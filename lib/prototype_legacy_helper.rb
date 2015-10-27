@@ -406,27 +406,124 @@ module PrototypeHelper
   #  periodically_call_remote(:url => 'update', :frequency => '20', :update => 'news_block')
   #
   def periodically_call_remote(options = {})
-     frequency = options[:frequency] || 10 # every ten seconds by default
-     code = "new PeriodicalExecuter(function() {#{remote_function(options)}}, #{frequency})"
-     javascript_tag(code)
+    frequency = options[:frequency] || 10 # every ten seconds by default
+    code = "new PeriodicalExecuter(function() {#{remote_function(options)}}, #{frequency})"
+    javascript_tag(code)
+  end
+
+  CALLBACKS    = Set.new([ :create, :uninitialized, :loading, :loaded,
+                           :interactive, :complete, :failure, :success ] +
+                           (100..599).to_a)
+
+  # Returns the JavaScript needed for a remote function.
+  # See the link_to_remote documentation at http://github.com/rails/prototype_legacy_helper as it takes the same arguments.
+  #
+  # Example:
+  #   # Generates: <select id="options" onchange="new Ajax.Updater('options',
+  #   # '/testing/update_options', {asynchronous:true, evalScripts:true})">
+  #   <select id="options" onchange="<%= remote_function(:update => "options",
+  #       :url => { :action => :update_options }) %>">
+  #     <option value="0">Hello</option>
+  #     <option value="1">World</option>
+  #   </select>
+  def remote_function(options)
+    javascript_options = options_for_ajax(options)
+
+    update = ''
+    if options[:update] && options[:update].is_a?(Hash)
+      update  = []
+      update << "success:'#{options[:update][:success]}'" if options[:update][:success]
+      update << "failure:'#{options[:update][:failure]}'" if options[:update][:failure]
+      update  = '{' + update.join(',') + '}'
+    elsif options[:update]
+      update << "'#{options[:update]}'"
+    end
+
+    function = update.empty? ?
+      "new Ajax.Request(" :
+      "new Ajax.Updater(#{update}, "
+
+    url_options = options[:url]
+    function << "'#{html_escape(escape_javascript(url_for(url_options)))}'"
+    function << ", #{javascript_options})"
+
+    function = "#{options[:before]}; #{function}" if options[:before]
+    function = "#{function}; #{options[:after]}"  if options[:after]
+    function = "if (#{options[:condition]}) { #{function}; }" if options[:condition]
+    function = "if (confirm('#{escape_javascript(options[:confirm])}')) { #{function}; }" if options[:confirm]
+
+    return function.html_safe
   end
 
   protected
-    def build_observer(klass, name, options = {})
-      if options[:with] && (options[:with] !~ /[\{=(.]/)
-        options[:with] = "'#{options[:with]}=' + encodeURIComponent(value)"
-      else
-        options[:with] ||= 'value' unless options[:function]
-      end
 
-      callback = options[:function] || remote_function(options)
-      javascript  = "new #{klass}('#{name}', "
-      javascript << "#{options[:frequency]}, " if options[:frequency]
-      javascript << "function(element, value) {"
-      javascript << "#{callback}}"
-      javascript << ")"
-      javascript_tag(javascript)
+  def build_observer(klass, name, options = {})
+    if options[:with] && (options[:with] !~ /[\{=(.]/)
+      options[:with] = "'#{options[:with]}=' + encodeURIComponent(value)"
+    else
+      options[:with] ||= 'value' unless options[:function]
     end
+
+    callback = options[:function] || remote_function(options)
+    javascript  = "new #{klass}('#{name}', "
+    javascript << "#{options[:frequency]}, " if options[:frequency]
+    javascript << "function(element, value) {"
+    javascript << "#{callback}}"
+    javascript << ")"
+    javascript_tag(javascript)
+  end
+
+  def options_for_javascript(options)
+    if options.empty?
+      '{}'
+    else
+      "{#{options.keys.map { |k| "#{k}:#{options[k]}" }.sort.join(', ')}}"
+    end
+  end
+
+  def options_for_ajax(options)
+    js_options = build_callbacks(options)
+
+    js_options['asynchronous'] = options[:type] != :synchronous
+    js_options['method']       = method_option_to_s(options[:method]) if options[:method]
+    js_options['insertion']    = "'#{options[:position].to_s.downcase}'" if options[:position]
+    js_options['evalScripts']  = options[:script].nil? || options[:script]
+
+    if options[:form]
+      js_options['parameters'] = 'Form.serialize(this)'
+    elsif options[:submit]
+      js_options['parameters'] = "Form.serialize('#{options[:submit]}')"
+    elsif options[:with]
+      js_options['parameters'] = options[:with]
+    end
+
+    if protect_against_forgery? && !options[:form]
+      if js_options['parameters']
+        js_options['parameters'] << " + '&"
+      else
+        js_options['parameters'] = "'"
+      end
+      js_options['parameters'] << "#{request_forgery_protection_token}=' + encodeURIComponent('#{escape_javascript form_authenticity_token}')"
+    end
+
+    options_for_javascript(js_options)
+  end
+
+  def method_option_to_s(method)
+    (method.is_a?(String) and !method.index("'").nil?) ? method : "'#{method}'"
+  end
+
+  def build_callbacks(options)
+    callbacks = {}
+    options.each do |callback, code|
+      if CALLBACKS.include?(callback)
+        name = 'on' + callback.to_s.capitalize
+        callbacks[name] = "function(request){#{code}}"
+      end
+    end
+    callbacks
+  end
+
 end
 
 ActionController::Base.helper PrototypeHelper
