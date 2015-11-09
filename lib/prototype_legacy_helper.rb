@@ -274,7 +274,6 @@ module PrototypeHelper
       apply_form_for_options!(object, options)
       args.unshift object
     end
-    Rails.logger.info "BOB: object_name:#{object_name.inspect}, args:#{args.inspect}"
 
     form_remote_tag options do
       fields_for object_name, *(args << options), &proc
