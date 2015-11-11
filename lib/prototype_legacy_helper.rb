@@ -262,7 +262,7 @@ module PrototypeHelper
     case record_or_name_or_array
     when String, Symbol
       object_name = record_or_name_or_array
-      args.unshift nil
+      args.unshift nil if args.empty?
     when Array
       object = record_or_name_or_array.last
       object_name = ActiveModel::Naming.singular(object)
